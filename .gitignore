@@ -1,4 +1,6 @@
 target/
 debug/
 .history/
-Justfile
+crates/steamworks/steam_sdk
+docs
+opencode.json

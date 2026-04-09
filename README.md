@@ -1,88 +1,192 @@
-# SML - ScrapModLoader
+# Scrap Mod Loader (SML)
 
-A mod loader and runtime patcher for the **Scrapland Remastered** game. SML is a Windows DLL that intercepts the game's execution, decrypts the Steam DRM stub, hooks game functions, and provides a console for modding.
+A mod loader for **Scrapland** (Steam App ID `897610`, Build `7863744`).
 
-## Features
+SML installs as a `d3d8.dll` proxy, hooks the game's entry point (works around Steamstub), and adds a Lua scripting sandbox, a native Python 1.5.2 module, an egui console, and a `.slm` plugin loader.
 
-- **Steam DRM Unpacking** — Decrypts and patches the Steam stub in-memory at runtime, restoring the original entry point and applying base relocations.
-- **Function Hooking** — Hooks game functions via detours using the `retour` library, with a custom `#[sml_hook]` procedural macro for ergonomic hook definition.
-- **Console Access** — Allocates a debug console and enables the built-in scenegraph console for interactive debugging.
-- **PAK File Monitoring** — Logs `.pak` archive open/close/read operations for modding insight.
-- **Python Integration** — Hooks `Py_Initialize` to inject custom Python code (`ScrapHacks`) into the game's embedded Python runtime.
-- **Panic Handler** — Captures backtraces on panic and displays them in a Windows message box for crash diagnostics.
+---
 
-## Architecture
+## Requirements
+
+| Component | Version |
+|---|---|
+| Rust | **nightly** (workspace uses `#![feature(...)]`) |
+| Target | `i686-pc-windows-msvc` (32-bit) |
+| MSVC | VS Build Tools with C++ workload |
+| Steamworks SDK | **[141](https://partner.steamgames.com/downloads/steamworks_sdk_141.zip)** |
+| Game | Scrapland build `7863744` |
+
+### Steamworks SDK setup
+
+Extract the `sdk/` folder from `steamworks_sdk_141.zip` into:
 
 ```
-SML (sml_loader.dll)
-├── patcher.rs        — Steam DRM decryptor & in-place patcher
-├── lib.rs            — DLL entry point, hook framework, game hooks
-└── sml_hook_macros/  — Procedural macro crate for #[sml_hook]
+crates/steamworks/steam_sdk/
+    public/steam/steam_api.h   ← required by build.rs
+    ...
 ```
 
-### Hook System
-
-Hooks are defined using the `#[sml_hook(RVA, ABI)]` attribute macro:
-
-```rust
-#[sml_hook(0x1307f0, thiscall)]
-unsafe fn pak_open(this: *const (), path: *const c_char, mode: i32) -> *const () {
-    let ret = original(this, path, mode);
-    println!("[PAK:OPEN]: {}", CStr::from_ptr(path).to_str().unwrap());
-    ret
-}
-```
-
-The macro generates a `Hookable` impl that registers the hook at load time via `linkme`'s distributed slice mechanism. Supported ABIs include `C` and `thiscall`.
-
-### Loading Mechanism
-
-SML is loaded as a **proxy DLL** (`d3d8.dll`). When the game loads `d3d8.dll` for Direct3D 8, SML is loaded instead, which then:
-
-1. Allocates a console for debug output.
-2. Loads the real `d3d8.dll` and forwards `Direct3DCreate8`.
-3. Detours the game's entry point to run the patcher and initialize hooks.
-4. Patches the Steam DRM stub in-place, restoring the original code section.
-5. Installs all registered function hooks.
-6. Transfers control to the original entry point.
+---
 
 ## Building
 
-### Prerequisites
+```powershell
+# Debug build of loader + default plugins
+cargo xtask build
 
-- **Rust** nightly toolchain (required by `retour`'s `thiscall-abi` and `nightly` features)
-- Windows SDK
-
-### Build
-
-```bash
-cargo build --release
+# Release build, install into your Scrapland install, then launch
+cargo xtask build --release --install --run
 ```
 
-The output is `target/release/sml_loader.dll`. Rename or copy it to `d3d8.dll` and place it in the game directory.
+`xtask` uses `steamlocate` to find the game and copies artifacts into:
 
-## Project Structure
+- `<scrapland>/Bin/d3d8.dll` - the loader (from `sml_loader.dll`)
+- `<scrapland>/plugins/util.slm` - default plugin
+- `<scrapland>/init.lua` - Lua bootstrap
 
-| Path               | Description                                                                                    |
-| ------------------ | ---------------------------------------------------------------------------------------------- |
-| `src/lib.rs`       | DLL entry point (`DllMain`), pattern scanner, hook framework, game hooks, console setup        |
-| `src/patcher.rs`   | Steam DRM header parsing, XOR/AES decryption, in-place code patching, relocation fixup         |
-| `sml_hook_macros/` | Proc-macro crate implementing `#[sml_hook]`                                                    |
-| `Cargo.toml`       | Dependencies: `retour`, `pelite`, `aes`, `cbc`, `linkme`, `facet`, `binrw`, `windows-rs`, etc. |
+Only packages that declare `[package.metadata] mod_loader = true` or a `[package.metadata.rescrap]` block are installed. The loader's `target_file = "d3d8"` metadata drives the DLL name.
 
-## Key Dependencies
+### Manual install
 
-| Crate         | Purpose                                 |
-| ------------- | --------------------------------------- |
-| `retour`      | Runtime function detouring/hooking      |
-| `pelite`      | PE file parsing and pattern scanning    |
-| `aes` + `cbc` | Steam DRM decryption                    |
-| `linkme`      | Distributed slice for hook registration |
-| `binrw`       | Binary reading for Steam header parsing |
-| `facet`       | Reflection for manifest/config parsing  |
-| `region`      | Memory protection manipulation          |
-| `windows`     | Win32 API bindings                      |
+```powershell
+cargo build -r
+Copy-Item target/i686-pc-windows-msvc/release/sml_loader.dll <scrapland>\Bin\d3d8.dll
+Copy-Item target/i686-pc-windows-msvc/release/util.dll       <scrapland>\plugins\util.slm
+Copy-Item init.lua                                            <scrapland>\
+```
 
-## License
+Launch with `-sml:disable` to skip all modloader behaviour (loads the real `d3d8.dll` and exits).
 
-See the root `LICENSE` file if present, or contact the author.
+---
+
+## Repository layout
+
+```
+crates/
+├── sml/                 → Bin/d3d8.dll  (the modloader)
+│   ├── lib.rs           DllMain, entry hook, VEH, plugin loader
+│   ├── hooks.rs         Engine detours (Py_Initialize, file I/O, …)
+│   ├── command.rs       Console dispatcher, FFI exports
+│   ├── gui.rs           egui console + log bridges
+│   ├── lua.rs           Sandboxed LuaJIT runtime
+│   └── boot.py          Python injected at Py_Initialize
+├── sml_hook_macros/     #[hook(rva, abi, enable)] proc-macro
+├── sml_types/           Engine types: HashTable/PackedIndex, Py* FFI
+├── steamworks/          Bindgen flat API + CCallbackBase shim
+└── util_plugin/         → plugins/util.slm  (installs SML Python module)
+
+xtask/                   cargo xtask build [--release] [--install] [--run]
+```
+
+---
+
+## Usage
+
+### In‑game console
+
+Any console input starting with `,` is intercepted: `,<module>.<command> <args>`.
+
+```
+,util.dump              # list packed-file index
+,util.dump scripts      # filter by substring
+,nethack                # fake LAN server (builtin)
+,steam                  # dump Steam interface pointers (builtin)
+,plugins                # list loaded plugins (builtin)
+```
+
+Omitting the module (`nethack`) targets SML itself.
+
+### GUI console
+
+The **Scrapland Console** window opens on startup:
+
+- **Editor** - Lua/Python scratchpad with syntax highlighting. Run with `Ctrl+Enter`. Lua uses the sandbox; Python calls `PyRun_SimpleString`.
+- **Console** - mirrors the engine log with colors, plus a **Render Console** mode that replays the engine's `rcon` buffer.
+
+### Lua
+
+```lua
+-- Sandbox API:
+--   hook(rva, signature, callback) -> DetourHandle
+--   rva(offset)                    -> usize
+--   scan(pattern)                  -> {{rva, …}, …}
+--   cstr(ptr)                      -> string
+--   print(...)                     -> engine console
+
+_G.create_entity_hook = hook(
+    rva(0x2099A0),
+    "void* (__stdcall *)(char*, float, float, float, char*)",
+    function(func, name, x, y, z, kind)
+        print("spawn", cstr(name), cstr(kind), x, y, z)
+        return func(name, 0, 0, 0, kind)  -- trampoline
+    end
+)
+```
+
+Hooks are refcounted per address; call `handle:unhook()` to remove one. Lua is bounded by a 1 s per‑call watchdog.
+
+### Python
+
+`boot.py` is injected at `Py_Initialize`, then `py_init` is called on every plugin. `util.slm` installs an `SML` module providing:
+
+| Function | Description |
+|---|---|
+| `SML.module(name?)` | Wrap a loaded module (or the game itself) as a writable Python buffer. |
+| `SML.hax(*objs)` | Print type names of the given objects. |
+| `SML.scan()` | Find `PyTypeObject`s in `.data` by heuristics. |
+| `SML.mem_scan(path)` | Dump a heap+module memory map to `path`. |
+
+Interpreter is **Python 1.5.2** (pre‑`Py_ssize_t`); see `crates/sml_types/src/python.rs`.
+
+---
+
+## Writing a plugin
+
+A `cdylib` that links `sml_types`, exposing any of:
+
+```rust
+#[unsafe(no_mangle)] pub unsafe extern "C" fn init(sml: *const ScrapModLoaderFFI) {}
+#[unsafe(no_mangle)] pub unsafe extern "C" fn py_init(sml: *const ScrapModLoaderFFI) -> bool { true }
+#[unsafe(no_mangle)] pub unsafe extern "C" fn cmd_dump(sml: *const ScrapModLoaderFFI, args: *mut c_char) -> bool { true }
+```
+
+Install metadata so `xtask` copies the artifact:
+
+```toml
+[package.metadata.rescrap]     # presence is enough
+
+[lib]
+crate-type = ["cdylib"]
+name       = "myplug"           # → plugins/myplug.slm
+```
+
+`ScrapModLoaderFFI` provides:
+
+```rust
+pub struct ScrapModLoaderFFI {
+    pub base:   *const (),                                  // game module base
+    pub cprint: unsafe extern "C" fn(u32, *const c_char),   // color, msg
+    pub log:    unsafe extern "C" fn(*const c_char, *const c_char), // level, msg
+}
+```
+
+See `crates/util_plugin/` for a minimal example.
+
+---
+
+## How it works
+
+1. **`DllMain`** - installs a panic handler, spawns a console, caches the real `Direct3DCreate8` from `%SystemRoot%\system32\d3d8.dll`.
+2. **Entry-point hook** - places a `retour` detour on `AddressOfEntryPoint`. If the PE magic at `[−0x3c] ^ [−0x3b]` equals `0xC0DEC0DF` (Steamstub), `.text` is remapped `RX → R`, a VEH is installed, and the hook is placed on the *unpacked* entry point when the decryptor faults.
+3. **`entry_point`** - loads every `plugins/*.slm`, calls `init`, runs `hooks::initialize_hooks()`, executes `init.lua`, spawns the GUI, then calls the original entry point.
+4. **`Direct3DCreate8`** - exported stub forwards to the cached pointer.
+
+---
+
+## Notes & limitations
+
+- Most hook RVAs are baked in against build `7863744`; other builds will fail to attach or crash.
+- The sandbox does **not** expose `ffi`; only the API listed above plus a curated subset of stdlibs. `cmd_lua("reset")` tears down the state and all detours.
+- The GUI is a standalone `eframe` window on its own thread - it is not rendered inside the game.
+- `SML.module` relies on Python 1.5.2's pre-`Py_ssize_t` ABI; porting to modern CPython requires rewriting that call.
+

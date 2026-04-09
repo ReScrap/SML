@@ -1,0 +1,52 @@
+[package]
+name    = "sml"
+version = "0.1.0"
+edition = "2024"
+
+[package.metadata]
+mod_loader = true
+target_file = "d3d8"
+
+[lib]
+name       = "sml_loader"
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = { version = "^1.0", features = ["backtrace"] }
+bt_rs = {package="backtrace", version = "^0.3"}
+libloading = "^0.9"
+linkme = "^0.3"
+pelite = { version = "0.10.0", features = ["unstable"] }
+region = "^4.0"
+retour = { version = "0.4.0-alpha.4", features = ["static-detour" ,"thiscall-abi", "nightly"] }
+rhexdump = "^0.2"
+sml_hook_macros = { path = "../sml_hook_macros"}
+sml_types = { path = "../sml_types"}
+steamworks = { path = "../steamworks"}
+tracing = "^0.1"
+tracing-subscriber = "^0.3"
+win-msgbox = "^0.2"
+parking_lot = { version = "^0.13", features = ["arc_lock"] }
+windows = { version = "0.53.0", features = [
+    "Foundation_Diagnostics",
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Memory",
+    "Win32_System_Kernel",
+    "Win32_System_SystemServices",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_Console",
+] }
+mlua = { version = "0.12.2", features = ["luajit52", "vendored", "macros", "send", "serde", "anyhow"] }
+egui_extras = { version = "0.37.0", features = ["syntect"] }
+eframe = { version = "0.37.0", default-features = false, features = ["default_fonts", "glow", "accesskit", "clipboard"] }
+winit = "0.30.13"
+crossbeam-channel = "0.5.17"
+serde_json = "1.0.154"
+serde = { version = "1.0.229", features = ["derive"] }
+fs-err = "^3.3"
+# hexpatch-keystone = { version = "0.9.4", features = ["build_keystone_cmake"] }

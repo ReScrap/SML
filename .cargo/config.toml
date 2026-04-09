@@ -1,4 +1,11 @@
 [build]
 target = "i686-pc-windows-msvc"
+
+[env]
+STEAM_SDK_LOCATION = { value = "steam_sdk", relative = true }
+
+[alias]
+xtask = "run --package xtask --"
+
 # [target.i686-pc-windows-msvc]
 # rustflags = ["-Zshare-generics=off"]

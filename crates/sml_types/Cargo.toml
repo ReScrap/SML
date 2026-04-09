@@ -1,0 +1,24 @@
+[package]
+name = "sml_types"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tracing = "0.1"
+windows = {version = "0.62", features = [
+    "Win32_System_Memory",
+    "Win32_System_ProcessStatus",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_System_Diagnostics",
+    "Win32_System_Diagnostics_Debug"
+]}
+rhexdump = "0.2"
+pelite = "0.10"
+undname = "2.1"
+stacked_errors = "0.8"
+region = "4.0"
+sif-itree = "0.4"
+facet = "0.46"
+petgraph = "0.8"
+byteorder = "1.5"

@@ -1,0 +1,11 @@
+[package]
+name = "steamworks"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+libloading = "0.9"
+
+[build-dependencies]
+bindgen = "0.73"
+cc = "1.8"

@@ -1,13 +1,15 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
-    parse::Parse, parse::ParseStream, parse_macro_input, parse_quote, Expr, FnArg, Ident, ItemFn,
-    LitStr, Pat, ReturnType, Token, Type,
+    Expr, FnArg, Ident, ItemFn, LitBool, LitStr, Pat, ReturnType, Token, Type,
+    parse::{Parse, ParseStream},
+    parse_macro_input, parse_quote,
 };
 
 struct HookArgs {
     rva: Expr,
     abi: LitStr,
+    enable: bool,
 }
 
 impl Parse for HookArgs {
@@ -22,11 +24,20 @@ impl Parse for HookArgs {
             LitStr::new(&ident.to_string(), ident.span())
         };
 
+        // Optional third argument: a boolean literal (defaults to true)
+        let enable = if input.peek(Token![,]) {
+            input.parse::<Token![,]>()?;
+            let lb: LitBool = input.parse()?;
+            lb.value
+        } else {
+            true
+        };
+
         if !input.is_empty() {
             return Err(input.error("expected #[hook(<rva>, <abi>)]"));
         }
 
-        Ok(Self { rva, abi })
+        Ok(Self { rva, abi, enable })
     }
 }
 
@@ -50,7 +61,7 @@ fn to_pascal_case(s: &str) -> String {
 
 #[proc_macro_attribute]
 pub fn hook(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let HookArgs { rva, abi } = parse_macro_input!(attr as HookArgs);
+    let HookArgs { rva, abi, enable } = parse_macro_input!(attr as HookArgs);
     let mut f = parse_macro_input!(item as ItemFn);
 
     if f.sig.generics.params.iter().next().is_some() {
@@ -62,7 +73,7 @@ pub fn hook(attr: TokenStream, item: TokenStream) -> TokenStream {
     let fn_name = f.sig.ident.clone();
     let vis = f.vis.clone();
 
-    f.sig.unsafety.get_or_insert_with(|| parse_quote!(unsafe));
+    f.sig.safety = syn::Safety::Unsafe(Default::default());
     f.sig.abi = Some(parse_quote!(extern #abi));
 
     let mut arg_types = Vec::<Type>::new();
@@ -105,7 +116,6 @@ pub fn hook(attr: TokenStream, item: TokenStream) -> TokenStream {
             let original: #func_ty = <#hook_struct as crate::Hookable>::get();
         },
     );
-    f.block.stmts.insert(1, parse_quote! { let _ = #fn_name; });
 
     let expanded = quote! {
         #f
@@ -116,10 +126,17 @@ pub fn hook(attr: TokenStream, item: TokenStream) -> TokenStream {
             const RVA: usize = #rva;
             type Func = #func_ty;
             const HOOK: *const () = #fn_name as *const ();
+            const NAME: &'static str = stringify!(#fn_name);
         }
 
-        fn #installer_fn(base_addr: usize) -> ::anyhow::Result<()> {
-            <#hook_struct as crate::Hookable>::hook(base_addr)
+        fn #installer_fn() -> ::anyhow::Result<()> {
+            <#hook_struct as crate::Hookable>::hook()?;
+            if !#enable {
+                <#hook_struct as crate::Hookable>::disable()?;
+            } else {
+                <#hook_struct as crate::Hookable>::enable()?;
+            }
+            Ok(())
         }
 
         #vis fn #disable_fn() -> ::anyhow::Result<()> {
@@ -132,7 +149,7 @@ pub fn hook(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         #[allow(non_upper_case_globals)]
         #[linkme::distributed_slice(crate::HOOK_INSTALLERS)]
-        static #installer_static: crate::HookInstallFn = #installer_fn;
+        static #installer_static: crate::HookInstaller = #installer_fn;
     };
 
     TokenStream::from(expanded)
