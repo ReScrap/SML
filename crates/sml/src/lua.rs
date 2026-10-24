@@ -54,6 +54,31 @@ impl Detour {
     }
 }
 
+#[derive(Debug)]
+struct Patcher {
+    name: Option<String>,
+    path: Option<String>,
+    patch: LuaFunction
+}
+
+#[derive(Default, Debug)]
+struct LuaPatchers(Vec<Patcher>);
+
+impl std::ops::DerefMut for LuaPatchers {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl std::ops::Deref for LuaPatchers {
+    type Target = Vec<Patcher>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+
 #[derive(Default, Debug)]
 struct LuaHooks(HashMap<usize, Vec<Detour>>);
 
@@ -162,6 +187,7 @@ impl LuaState {
         let lua = unsafe { Lua::unsafe_new_with(LuaStdLib::ALL, LuaOptions::new()) };
         lua.load("jit.off()").exec()?;
         lua.set_app_data(LuaHooks::default());
+        lua.set_app_data(LuaPatchers::default());
         lua.set_memory_limit(1024 * 1024 * 32)?;
         let env = lua.create_table()?;
         let hook_env = env.clone();
@@ -171,6 +197,7 @@ impl LuaState {
         for &m in SAFE_MODULES {
             env.set(m, g.get_path::<LuaValue>(m)?)?;
         }
+
         env.set("_G", env.clone())?;
         env.set("print", lua.create_function(Self::lua_print)?)?;
         env.set(
@@ -184,7 +211,8 @@ impl LuaState {
             lua.create_function(|_, v: usize| Ok(rva::<()>(v).addr()))?,
         )?;
         env.set("scan", lua.create_function(Self::lua_scan)?)?;
-        lua.set_app_data(EnvStore(env.clone())); // <-- store sandbox env
+        env.set("patch_python", lua.create_function(Self::lua_patch_python)?)?;
+        lua.set_app_data(EnvStore(env.clone()));
         Ok(LuaState { lua, env })
     }
 
@@ -200,6 +228,25 @@ impl LuaState {
             ret.push(save.to_vec());
         }
         Ok(ret)
+    }
+
+    fn lua_patch_python(
+        lua: &Lua,
+        (matcher, patcher): (LuaTable, LuaFunction)
+    ) -> LuaResult<()> {
+        let name = matcher.get::<Option<String>>("name")?;
+        let path = matcher.get::<Option<String>>("path")?;
+        if name.is_none() && path.is_none() {
+            return Err(LuaError::runtime("need at least one of: name or path matchers"));
+        }
+        let mut patchers = lua.app_data_mut::<LuaPatchers>()
+            .ok_or_else(|| LuaError::runtime("LuaPatchers not initialized!"))?;
+        patchers.push(Patcher {
+            name,
+            path,
+            patch: patcher,
+        });
+        Ok(())
     }
 
     fn lua_hook_raw(
@@ -251,7 +298,6 @@ impl LuaState {
             .call::<()>(tramp)?;
         state.set("set_original", LuaValue::Nil)?;
 
-        dbg!(&state);
 
         unsafe { raw.enable() }
             .map_err(|e| LuaError::runtime(format!("RawDetour::enable: {e}")))?;
@@ -291,7 +337,7 @@ impl LuaState {
         const TIMEOUT: Duration = Duration::from_secs(1);
         self.lua.set_hook(
             LuaHookTriggers::new().every_nth_instruction(1000),
-            move |lua, debug| {
+            move |_, debug| {
                 if t_start.elapsed() > TIMEOUT {
                     // 1. Grab function metadata
                     let info = debug.function().info();
@@ -337,6 +383,34 @@ impl LuaState {
                 .eval::<LuaValue>()
         })
     }
+
+    pub fn patch_file(&self, name: &str, path: &str, code: &str) -> LuaResult<String> {
+        self.lua(|lua| -> LuaResult<String> {
+            let mut code = code.to_owned();
+            let g = lua.globals();
+            let string_find = g.get_path::<LuaFunction>("string.find")?;
+            let patchers = lua.app_data_ref::<LuaPatchers>().ok_or_else(|| LuaError::runtime("LuaHooks not initialized!"))?;
+            for patcher in patchers.iter() {
+                let mut matched = false;
+                if let Some(name_pat) = patcher.name.as_ref() {
+                    let name_match = string_find.call::<(Option<i64>,Option<i64>)>((name, name_pat.as_str(),))?;
+                    matched |= name_match.0.is_some();
+                    matched |= name_match.1.is_some();
+                }
+                if let Some(path_pat) = patcher.path.as_ref() {
+                    let path_match = string_find.call::<(Option<i64>,Option<i64>)>((path, path_pat.as_str()))?;
+                    matched |= path_match.0.is_some();
+                    matched |= path_match.1.is_some();
+                }
+                if matched {
+                    let code_len = code.len();
+                    info!("{patchers:?} fired for {name}@{path} ({code_len})");
+                    code = patcher.patch.call::<Option<String>>((name, path, code.as_str()))?.unwrap_or_default();
+                }
+            }
+            Ok(code.to_owned())
+        })
+    }
 }
 
 pub(crate) static S_LUA: LazyLock<RwLock<LuaState>> =
@@ -374,4 +448,9 @@ pub unsafe extern "C" fn cmd_lua(_sml: *const ScrapModLoaderFFI, cmd: *mut c_cha
     }
     // state.gc();
     true
+}
+
+pub(crate) fn patch_file(name: &str, path: &str, code: &str) -> Result<String> {
+    let state = S_LUA.read();
+    state.patch_file(name, path, code).map_err(|e| anyhow!(e))
 }

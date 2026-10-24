@@ -48,7 +48,7 @@ impl CStrDisp {
     pub fn get(&self) -> Option<&CStr> {
         unsafe { (!self.0.is_null()).then(|| CStr::from_ptr(self.0)) }
     }
-    const fn null() -> Self {
+    pub const fn null() -> Self {
         Self(std::ptr::null())
     }
 

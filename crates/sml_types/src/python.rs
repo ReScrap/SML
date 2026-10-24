@@ -30,18 +30,7 @@ use windows::Win32::{
 use crate::CStrDisp;
 
 use std::{
-    any::TypeId,
-    backtrace,
-    collections::{BTreeMap, HashMap},
-    ffi::CString,
-    fmt::{Debug, Formatter},
-    fs::File,
-    io::{BufWriter, Seek, Write},
-    ops::ControlFlow,
-    os::raw::{c_char, c_int, c_long, c_void},
-    path::PathBuf,
-    sync::LazyLock,
-    u32,
+    any::TypeId, backtrace, cell::LazyCell, collections::{BTreeMap, HashMap}, ffi::CString, fmt::{Debug, Formatter}, fs::File, io::{BufWriter, Seek, Write}, ops::ControlFlow, os::raw::{c_char, c_int, c_long, c_void}, path::PathBuf, sync::LazyLock, u32,
 };
 
 pub const METH_OLDARGS: c_int = 0x0000; // "old-style" - single tuple argument
@@ -686,6 +675,11 @@ fn do_mem_scan(dump_name: &str) -> Result<()> {
     return Ok(());
 }
 
+
+pub(crate) const fn func<T: Sized + Copy + 'static, const OFFSET: usize>() -> LazyCell<T> {
+    LazyCell::new(|| unsafe { core::mem::transmute_copy::<*mut (), T>(&rva::<()>(OFFSET)) })
+}
+
 pub mod PySML {
     use std::{
         cell::LazyCell,
@@ -713,10 +707,6 @@ pub mod PySML {
     use super::*;
     pub(crate) mod native {
         use super::*;
-
-        const fn func<T: Sized + Copy + 'static, const OFFSET: usize>() -> LazyCell<T> {
-            LazyCell::new(|| unsafe { core::mem::transmute_copy::<*mut (), T>(&rva::<()>(OFFSET)) })
-        }
 
         pub(crate) const PyNoneRVA: usize = 0x435f84;
         pub(crate) const PyArg_ParseTuple: LazyCell<

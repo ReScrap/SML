@@ -24,6 +24,7 @@ struct BuildArgs {
     /// Run game after installing modloader
     #[arg(long)]
     run: bool,
+    /// Arguments passed to Scrapland
     args: Vec<String>,
 }
 

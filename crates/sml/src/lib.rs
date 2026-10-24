@@ -302,9 +302,18 @@ fn rva<T>(addr: usize) -> *mut T {
     unsafe {
         let hmod: HMODULE = GetModuleHandleW(None).expect("GetModuleHandleW in rva");
         let ptr = hmod.0 as *mut T;
-        return ptr.byte_add(addr);
+        ptr.byte_add(addr)
     }
 }
+
+fn rva_copy<T: Copy>(addr: usize) -> T {
+    unsafe {
+        let hmod: HMODULE = GetModuleHandleW(None).expect("GetModuleHandleW in rva");
+        let ptr = hmod.0 as usize + addr;
+        std::mem::transmute_copy(&ptr)
+    }
+}
+
 
 pub(crate) fn write_rva<T>(addr: usize, val: T) -> Result<()> {
     let p = rva::<T>(addr);
@@ -578,13 +587,15 @@ pub unsafe extern "C" fn cmd_steam(_sml: *const ScrapModLoaderFFI, _cmd: *mut c_
             pipe,
             c"SteamNetworking005".as_ptr(),
         );
-        let net_new = api.SteamAPI_ISteamClient_GetISteamNetworking(
-            client,
-            user,
-            pipe,
-            c"SteamNetworkingMessages002".as_ptr(),
-        );
-        dbg!(client, user, pipe, mm, utils, net, net_new);
+        dbg!(client, user, pipe, mm, utils, net);
+        let steamid = CSteamID {
+            m_steamid: CSteamID_SteamID_t {
+                m_unAll64Bits: 76561198154176126,
+            },
+        };
+        let data = b"Hello World!";
+        let res = api.SteamAPI_ISteamNetworking_SendP2PPacket(net as isize, steamid, data.as_ptr().cast(), data.len().try_into()?, EP2PSend::k_EP2PSendReliable, 0);
+        dbg!(res);
         // let callback = rust_callback_create(
         //     size_of::<GameOverlayActivated_t>() as i32,
         //     false,
@@ -597,7 +608,7 @@ pub unsafe extern "C" fn cmd_steam(_sml: *const ScrapModLoaderFFI, _cmd: *mut c_
 
         Ok(())
     })();
-    return res.is_ok();
+    return dbg!(res).is_ok();
 }
 
 #[unsafe(no_mangle)]

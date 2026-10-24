@@ -49,4 +49,7 @@ crossbeam-channel = "0.5.17"
 serde_json = "1.0.154"
 serde = { version = "1.0.229", features = ["derive"] }
 fs-err = "^3.3"
+libffi = { version = "5.2.0", features = ["complex"] }
+encoding = "0.2.33"
+
 # hexpatch-keystone = { version = "0.9.4", features = ["build_keystone_cmake"] }
