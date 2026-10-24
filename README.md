@@ -13,18 +13,7 @@ SML installs as a `d3d8.dll` proxy, hooks the game's entry point (works around S
 | Rust | **nightly** (workspace uses `#![feature(...)]`) |
 | Target | `i686-pc-windows-msvc` (32-bit) |
 | MSVC | VS Build Tools with C++ workload |
-| Steamworks SDK | **[141](https://partner.steamgames.com/downloads/steamworks_sdk_141.zip)** |
 | Game | Scrapland build `7863744` |
-
-### Steamworks SDK setup
-
-Extract the `sdk/` folder from `steamworks_sdk_141.zip` into:
-
-```
-crates/steamworks/steam_sdk/
-    public/steam/steam_api.h   ← required by build.rs
-    ...
-```
 
 ---
 
@@ -189,4 +178,3 @@ See `crates/util_plugin/` for a minimal example.
 - The sandbox does **not** expose `ffi`; only the API listed above plus a curated subset of stdlibs. `cmd_lua("reset")` tears down the state and all detours.
 - The GUI is a standalone `eframe` window on its own thread - it is not rendered inside the game.
 - `SML.module` relies on Python 1.5.2's pre-`Py_ssize_t` ABI; porting to modern CPython requires rewriting that call.
-

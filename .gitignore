@@ -1,6 +1,5 @@
 target/
 debug/
 .history/
-crates/steamworks/steam_sdk
 docs
 opencode.json
